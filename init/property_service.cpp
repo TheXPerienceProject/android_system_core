@@ -1216,6 +1216,9 @@ void PropertyLoadBootDefaults() {
         }
     }
 
+    // Update with vendor-specific property runtime overrides
+    vendor_load_properties();
+
     property_initialize_ro_product_props();
     property_derive_build_fingerprint();
     property_initialize_ro_cpu_abilist();
