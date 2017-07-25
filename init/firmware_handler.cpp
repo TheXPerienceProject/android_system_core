@@ -68,29 +68,30 @@ static bool IsBooting() {
 }
 
 /*
-Special firmware look-up functionality intended for non-system media firmware (ie.
-downloaded firmware). The folders provided must be protected via SELinux policy.
+   Special firmware look-up functionality intended for non-system media firmware (ie.
+   downloaded firmware). The folders provided must be protected via SELinux policy.
 */
 struct extended_fw_path {
     const char *fw_substring;
     const char *fw_path;
 };
+
 const struct extended_fw_path extended_paths[] = {
 #ifdef MOTO_AOV_WITH_XMCS
-{
-    .fw_substring = "-aov-",
-    .fw_path = "/data/adspd",
-},
-{
-    .fw_substring = "-ultrasound",
-    .fw_path = "/data/adspd",
-},
+    {
+        .fw_substring = "-aov-",
+        .fw_path = "/data/adspd",
+    },
+    {
+        .fw_substring = "-ultrasound",
+        .fw_path = "/data/adspd",
+    },
 #endif
 #ifdef MOTO_GREYBUS_FIRMWARE
-{
-    .fw_substring = "upd-",
-    .fw_path = "/data/gbfirmware",
-},
+    {
+        .fw_substring = "upd-",
+        .fw_path = "/data/gbfirmware",
+    },
 #endif
 };
 
@@ -109,17 +110,17 @@ static int is_hard_link(const char *path)
     return(rv);
 }
 
-static int load_one_extended(const Uevent& uevent, int loading_fd, int data_fd, size_t index)
+static int LoadOneExtended(uevent* uevent, int loading_fd, int data_fd, size_t index)
 {
     int ret = 0;
-    std::string root = android::base::StringPrintf("/sys%s", uevent.path.c_str());
+    std::string root = StringPrintf("/sys%s", uevent->path);
 
     /* look for naming convention for the target firmware */
-    if (android::base::strstr(uevent.firmware.c_str(), extended_paths[index].fw_substring) == NULL) {
+    if (strstr(uevent->firmware, extended_paths[index].fw_substring) == NULL) {
         return 0;
     }
 
-    std::string file = android::base::StringPrintf("%s/%s", extended_paths[index].fw_path, uevent.firmware.c_str());
+    std::string file = StringPrintf("%s/%s", extended_paths[index].fw_path, uevent->firmware);
 
     if (is_hard_link(file.c_str())) {
         return 0;
@@ -128,7 +129,7 @@ static int load_one_extended(const Uevent& uevent, int loading_fd, int data_fd, 
     /* Do not consider the case /data folder is still encrypted. It is assumed
        userspace apps needing these files are started only after data partition
        is decrypted. */
-    android::base::unique_fd fw_fd(open(file.c_str(), O_RDONLY|O_NOFOLLOW));
+    unique_fd fw_fd(open(file.c_str(), O_RDONLY|O_NOFOLLOW));
     struct stat sb;
     if (fw_fd != -1 && fstat(fw_fd, &sb) != -1) {
         LoadFirmware(uevent, root, fw_fd, sb.st_size, loading_fd, data_fd);
@@ -139,20 +140,22 @@ static int load_one_extended(const Uevent& uevent, int loading_fd, int data_fd, 
 
     return ret;
 }
+
 /*
     -   The function returns the following values:
     -   -1 - Firmware loading was either success or failure. No need to look for further folders.
     -    0 - Firmware was not loaded. Further folders need to be looked up.
 */
-static int load_from_extended(const Uevent& uevent, int loading_fd, int data_fd)
+static int LoadFromExtended(uevent* uevent, int loading_fd, int data_fd)
 {
     size_t i;
 
     /* Loop through all possible extended folders unless we find a firmware */
-    for (i = 0; i < ARRAY_SIZE(extended_paths); i++)
-        if (load_one_extended(uevent, loading_fd, data_fd, i) == -1)
+    for (i = 0; i < arraysize(extended_paths); i++)
+        if (LoadOneExtended(uevent, loading_fd, data_fd, i) == -1)
             return -1;
-     return 0;
+
+    return 0;
 }
 
 static void ProcessFirmwareEvent(const Uevent& uevent) {
@@ -176,9 +179,12 @@ static void ProcessFirmwareEvent(const Uevent& uevent) {
         return;
     }
 
-    if (load_from_extended(uevent, loading_fd, data_fd) < 0) {
+    if (LoadFromExtended(uevent, loading_fd, data_fd) < 0) {
         return;
     }
+
+    static const char* firmware_dirs[] = {"/etc/firmware/", "/odm/firmware/",
+                                          "/vendor/firmware/", "/firmware/image/"};
 
 try_loading_again:
     for (const auto& firmware_directory : firmware_directories) {
