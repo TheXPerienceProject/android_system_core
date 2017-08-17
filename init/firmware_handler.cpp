@@ -141,6 +141,8 @@ static int LoadOneExtended(uevent* uevent, int loading_fd, int data_fd, size_t i
     return ret;
 }
 
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
+
 /*
     -   The function returns the following values:
     -   -1 - Firmware loading was either success or failure. No need to look for further folders.
@@ -151,7 +153,7 @@ static int LoadFromExtended(uevent* uevent, int loading_fd, int data_fd)
     size_t i;
 
     /* Loop through all possible extended folders unless we find a firmware */
-    for (i = 0; i < arraysize(extended_paths); i++)
+    for (i = 0; i < ARRAY_SIZE(extended_paths); i++)
         if (LoadOneExtended(uevent, loading_fd, data_fd, i) == -1)
             return -1;
 
