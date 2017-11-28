@@ -322,8 +322,8 @@ bool BatteryMonitor::update(void) {
 
     // get mod battery status
     if (access(mHealthdConfig->modStatusPath.string(), R_OK) == 0) {
-        if (readFromFile(mHealthdConfig->modStatusPath, buf2) > 0) {
-            props.modStatus = getBatteryStatus(buf2);
+        if (readFromFile(mHealthdConfig->modStatusPath, &buf) > 0) {
+            props.modStatus = getBatteryStatus(buf.c_str());
         }
     }
 
