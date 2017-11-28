@@ -315,7 +315,7 @@ bool BatteryMonitor::update(void) {
     props->modLevel = -1;
     props->modStatus = BATTERY_STATUS_UNKNOWN;
     props->modType = POWER_SUPPLY_MOD_TYPE_UNKNOWN;
-    props->modPowerSource = 0;
+    //props->modPowerSource = 0;
     props->modFlag = 0;
 
     // get mod battery status
@@ -337,9 +337,9 @@ bool BatteryMonitor::update(void) {
         }
 
         // get mod powersource
-        if (access(mHealthdConfig->modPowerSourcePath.string(), R_OK) == 0) {
+        /*if (access(mHealthdConfig->modPowerSourcePath.string(), R_OK) == 0) {
             props.modPowerSource = getIntField(mHealthdConfig->modPowerSourcePath);
-        }
+        }*/
 
         // attempt to hack battery level for non-empty supplemental mod
         if ((props.modType == POWER_SUPPLY_MOD_TYPE_SUPPLEMENTAL) &&
@@ -380,7 +380,7 @@ bool BatteryMonitor::update(void) {
         props.modLevel = -1;
         props.modStatus == BATTERY_STATUS_UNKNOWN;
         props.modType = POWER_SUPPLY_MOD_TYPE_UNKNOWN;
-        props.modPowerSource = 0;
+        //props.modPowerSource = 0;
         props.modFlag = 0;
     }
     // END IKMODS-149
@@ -429,8 +429,8 @@ bool BatteryMonitor::update(void) {
             snprintf(b, sizeof(b), " mt=%d", props.modType);
             strlcat(dmesgline, b, sizeof(dmesgline));
 
-            snprintf(b, sizeof(b), " mps=%d", props.modPowerSource);
-            strlcat(dmesgline, b, sizeof(dmesgline));
+            /*snprintf(b, sizeof(b), " mps=%d", props.modPowerSource);
+            strlcat(dmesgline, b, sizeof(dmesgline));*/
             // END IKMODS-149
         } else {
             len = snprintf(dmesgline, sizeof(dmesgline),
@@ -778,7 +778,7 @@ void BatteryMonitor::init(struct healthd_config *hc) {
     mHealthdConfig->modTypePath = POWER_SUPPLY_MOD_TYPE_PATH;
 
     // mod Power Source path
-    mHealthdConfig->modPowerSourcePath = POWER_SOURCE_MOD_PATH;
+    //mHealthdConfig->modPowerSourcePath = POWER_SOURCE_MOD_PATH;
 
     // efficiency mode recharge start path
     mHealthdConfig->modRechargeStartLevelPath = POWER_SUPPLY_MOD_RECHRG_START_SOC;
