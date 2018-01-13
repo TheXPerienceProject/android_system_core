@@ -58,16 +58,33 @@ static bool IsBooting() {
 }
 
 /*
-   BEGIN IKVOICE-4341
-   Special firmware look-up function intended for AoV feature with Cirrus XMCS codec.
-   The foloder is intended to be used for speech model downloading and firmware upgrade.
-   Folder is specifically protected for AoV use via SELinux policy.
-
-   The function returns the following values:
-   -1 - Firmware loading was either success or failure. No need to look for further folders.
-    0 - Firmware was not loaded. Further folders need to be looked up.
+   Special firmware look-up functionality intended for non-system media firmware (ie.
+   downloaded firmware). The folders provided must be protected via SELinux policy.
 */
+struct extended_fw_path {
+    const char *fw_substring;
+    const char *fw_path;
+};
+
+const struct extended_fw_path extended_paths[] = {
 #ifdef MOTO_AOV_WITH_XMCS
+    {
+        .fw_substring = "-aov-",
+        .fw_path = "/data/adspd",
+    },
+    {
+        .fw_substring = "-ultrasound",
+        .fw_path = "/data/adspd",
+    },
+#endif
+#ifdef MOTO_GREYBUS_FIRMWARE
+    {
+        .fw_substring = "upd-",
+        .fw_path = "/data/gbfirmware",
+    },
+#endif
+};
+
 static int is_hard_link(const char *path)
 {
     int rv = 1;
@@ -77,52 +94,59 @@ static int is_hard_link(const char *path)
         if((S_ISDIR(sb.st_mode)) || (sb.st_nlink == 1))
             rv = 0;
         else
-            ERROR("Invalid hard link (%s), nlink=%ld ignoring!\n", path,
-                  (long)sb.st_nlink);
+            LOG(ERROR) << "Invalid hard link (" << path << "), nlink=" << sb.st_nlink << " ignoring!";
     } else if (errno == ENOENT)
         rv = 0;
     return(rv);
 }
 
-static int load_from_extended(const char *firmware, int loading_fd, int data_fd)
+static int load_one_extended(uevent* uevent, int loading_fd, int data_fd, size_t index)
 {
-    int l, fw_fd;
-    char *file = NULL;
     int ret = 0;
+    std::string root = android::base::StringPrintf("/sys%s", uevent->path);
 
-    /* look for naming convention for aov firmware */
-    if (strstr(firmware, "-aov-") == NULL) {
+    /* look for naming convention for the target firmware */
+    if (strstr(uevent->firmware, extended_paths[index].fw_substring) == NULL) {
         return 0;
     }
 
-    l = asprintf(&file, "/data/adspd/%s", firmware);
-    if (l == -1)
+    std::string file = android::base::StringPrintf("%s/%s", extended_paths[index].fw_path, uevent->firmware);
+
+    if (is_hard_link(file.c_str())) {
         return 0;
-
-    if (is_hard_link(file)) {
-        goto out_extended;
     }
 
-    /* Do not consider the case /data folder is still encrypted.
-       It is assumed adspd is started only after data partition is decrypted
-       so firmware request for XMCS would happen on decripted fs */
-    fw_fd = open(file, O_RDONLY | O_NOFOLLOW);
-    if(fw_fd < 0) {
-        goto out_extended;
+    /* Do not consider the case /data folder is still encrypted. It is assumed
+       userspace apps needing these files are started only after data partition
+       is decrypted. */
+    android::base::unique_fd fw_fd(open(file.c_str(), O_RDONLY|O_NOFOLLOW));
+    struct stat sb;
+    if (fw_fd != -1 && fstat(fw_fd, &sb) != -1) {
+        load_firmware(uevent, root, fw_fd, sb.st_size, loading_fd, data_fd);
+        ret = -1;
+    } else {
+        return 0;
     }
 
-    if (load_firmware(fw_fd, loading_fd, data_fd) != 0) {
-        ERROR("firmware: could not load '%s'\n", firmware);
-    }
-    close(fw_fd);
-    ret = -1;
-
-out_extended:
-    free(file);
     return ret;
 }
-#endif
-/* END IKVOICE-4341 */
+
+/*
+    -   The function returns the following values:
+    -   -1 - Firmware loading was either success or failure. No need to look for further folders.
+    -    0 - Firmware was not loaded. Further folders need to be looked up.
+*/
+static int load_from_extended(uevent* uevent, int loading_fd, int data_fd)
+{
+    size_t i;
+
+    /* Loop through all possible extended folders unless we find a firmware */
+    for (i = 0; i < arraysize(extended_paths); i++)
+        if (load_one_extended(uevent, loading_fd, data_fd, i) == -1)
+            return -1;
+
+    return 0;
+}
 
 static void ProcessFirmwareEvent(const Uevent& uevent) {
     int booting = IsBooting();
@@ -148,13 +172,9 @@ static void ProcessFirmwareEvent(const Uevent& uevent) {
     static const char* firmware_dirs[] = {"/etc/firmware/", "/vendor/firmware/",
                                           "/firmware/image/"};
 
-/* BEGIN IKVOICE-4341 */
-#ifdef MOTO_AOV_WITH_XMCS
-    if (load_from_extended(uevent->firmware, loading_fd, data_fd) < 0) {
-        goto data_close_out;
+    if (load_from_extended(uevent, loading_fd, data_fd) < 0) {
+        return;
     }
-#endif
-/* END IKVOICE-4341 */
 
 try_loading_again:
     for (size_t i = 0; i < arraysize(firmware_dirs); i++) {
