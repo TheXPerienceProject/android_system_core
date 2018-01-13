@@ -187,6 +187,7 @@ BatteryMonitor::PowerSupplyType BatteryMonitor::readPowerSupplyType(const String
             { "USB_PD_DRP", ANDROID_POWER_SUPPLY_TYPE_USB },
             { "Wireless", ANDROID_POWER_SUPPLY_TYPE_WIRELESS },
             { "DASH", ANDROID_POWER_SUPPLY_TYPE_AC },
+            { "BMS", ANDROID_POWER_SUPPLY_TYPE_BMS },
             { NULL, 0 },
     };
 
@@ -766,7 +767,16 @@ void BatteryMonitor::init(struct healthd_config *hc) {
                 }
 
                 break;
-
+            case ANDROID_POWER_SUPPLY_TYPE_BMS:
+                if (mHealthdConfig->batteryFullChargePath.isEmpty()) {
+                    path.clear();
+                    path.appendFormat("%s/%s/charge_full",
+                                      POWER_SUPPLY_SYSFS_PATH, name);
+                    if (access(path, R_OK) == 0) {
+                        mHealthdConfig->batteryFullChargePath = path;
+                    }
+                }
+                break;
             case ANDROID_POWER_SUPPLY_TYPE_UNKNOWN:
                 break;
             }
