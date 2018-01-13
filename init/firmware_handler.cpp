@@ -22,16 +22,25 @@
 #include <unistd.h>
 
 #include <string>
+#include <string.h>
 #include <thread>
 
 #include <android-base/chrono_utils.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/unique_fd.h>
+#include <android-base/stringprintf.h>
+
+#include "ueventd_parser.h"
+#include "property_service.h"
 
 using android::base::Timer;
 using android::base::unique_fd;
 using android::base::WriteFully;
+using android::base::StringPrintf;
+
+#define SYSFS_PREFIX    "/sys"
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 
 namespace android {
 namespace init {
@@ -100,17 +109,17 @@ static int is_hard_link(const char *path)
     return(rv);
 }
 
-static int load_one_extended(uevent* uevent, int loading_fd, int data_fd, size_t index)
+static int load_one_extended(const Uevent& uevent, int loading_fd, int data_fd, size_t index)
 {
     int ret = 0;
-    std::string root = android::base::StringPrintf("/sys%s", uevent->path);
+    std::string root = android::base::StringPrintf("/sys%s", uevent.path.c_str());
 
     /* look for naming convention for the target firmware */
-    if (strstr(uevent->firmware, extended_paths[index].fw_substring) == NULL) {
+    if (android::base::strstr(uevent.firmware.c_str(), extended_paths[index].fw_substring) == NULL) {
         return 0;
     }
 
-    std::string file = android::base::StringPrintf("%s/%s", extended_paths[index].fw_path, uevent->firmware);
+    std::string file = android::base::StringPrintf("%s/%s", extended_paths[index].fw_path, uevent.firmware.c_str());
 
     if (is_hard_link(file.c_str())) {
         return 0;
@@ -122,7 +131,7 @@ static int load_one_extended(uevent* uevent, int loading_fd, int data_fd, size_t
     android::base::unique_fd fw_fd(open(file.c_str(), O_RDONLY|O_NOFOLLOW));
     struct stat sb;
     if (fw_fd != -1 && fstat(fw_fd, &sb) != -1) {
-        load_firmware(uevent, root, fw_fd, sb.st_size, loading_fd, data_fd);
+        LoadFirmware(uevent, root, fw_fd, sb.st_size, loading_fd, data_fd);
         ret = -1;
     } else {
         return 0;
@@ -136,12 +145,12 @@ static int load_one_extended(uevent* uevent, int loading_fd, int data_fd, size_t
     -   -1 - Firmware loading was either success or failure. No need to look for further folders.
     -    0 - Firmware was not loaded. Further folders need to be looked up.
 */
-static int load_from_extended(uevent* uevent, int loading_fd, int data_fd)
+static int load_from_extended(const Uevent& uevent, int loading_fd, int data_fd)
 {
     size_t i;
 
     /* Loop through all possible extended folders unless we find a firmware */
-    for (i = 0; i < arraysize(extended_paths); i++)
+    for (i = 0; i < ARRAY_SIZE(extended_paths); i++)
         if (load_one_extended(uevent, loading_fd, data_fd, i) == -1)
             return -1;
 
@@ -169,12 +178,12 @@ static void ProcessFirmwareEvent(const Uevent& uevent) {
         return;
     }
 
-    static const char* firmware_dirs[] = {"/etc/firmware/", "/vendor/firmware/",
-                                          "/firmware/image/"};
-
     if (load_from_extended(uevent, loading_fd, data_fd) < 0) {
         return;
     }
+
+    static const char* firmware_dirs[] = {"/etc/firmware/", "/vendor/firmware/",
+                                          "/firmware/image/"};
 
 try_loading_again:
     for (size_t i = 0; i < arraysize(firmware_dirs); i++) {

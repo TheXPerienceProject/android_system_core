@@ -50,6 +50,8 @@ void StringAppendV(std::string* dst, const char* format, va_list ap)
 
 #undef FORMAT_ARCHETYPE
 
+char * strstr ( const char *, const char * );
+
 }  // namespace base
 }  // namespace android
 
