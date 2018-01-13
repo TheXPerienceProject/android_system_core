@@ -39,7 +39,6 @@ using android::base::unique_fd;
 using android::base::WriteFully;
 using android::base::StringPrintf;
 
-#define SYSFS_PREFIX    "/sys"
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 
 namespace android {
