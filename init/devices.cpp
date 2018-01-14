@@ -382,7 +382,7 @@ void DeviceHandler::HandleDeviceEvent(const Uevent& uevent) {
 
     /* specially handle uevent of "mods_interface" to fix race with ModManager */
     if (uevent.subsystem == "mods_interfaces" && uevent.action == "online") {
-        std::string uevent_path = android::base::StringPrintf("%s/%s/uevent", SYSFS_PREFIX, uevent.path.c_str());
+        std::string uevent_path = android::base::StringPrintf("%s%s/uevent", SYSFS_PREFIX, uevent.path.c_str());
         int fd = open(uevent_path.c_str(), O_WRONLY);
         if (fd >= 0) {
             write(fd, "add\n", 4);
