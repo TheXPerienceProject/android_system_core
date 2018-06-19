@@ -459,39 +459,41 @@ static void cmd_procprio(LMKD_CTRL_PACKET packet) {
     if (use_inkernel_interface)
         return;
 
-    if (params.oomadj >= 900) {
-        soft_limit_mult = 0;
-    } else if (params.oomadj >= 800) {
-        soft_limit_mult = 0;
-    } else if (params.oomadj >= 700) {
-        soft_limit_mult = 0;
-    } else if (params.oomadj >= 600) {
-        // Launcher should be perceptible, don't kill it.
-        params.oomadj = 200;
-        soft_limit_mult = 1;
-    } else if (params.oomadj >= 500) {
-        soft_limit_mult = 0;
-    } else if (params.oomadj >= 400) {
-        soft_limit_mult = 0;
-    } else if (params.oomadj >= 300) {
-        soft_limit_mult = 1;
-    } else if (params.oomadj >= 200) {
-        soft_limit_mult = 2;
-    } else if (params.oomadj >= 100) {
-        soft_limit_mult = 10;
-    } else if (params.oomadj >=   0) {
-        soft_limit_mult = 20;
-    } else {
-        // Persistent processes will have a large
-        // soft limit 512MB.
-        soft_limit_mult = 64;
-    }
+    if (low_ram_device) {
+        if (params.oomadj >= 900) {
+            soft_limit_mult = 0;
+        } else if (params.oomadj >= 800) {
+            soft_limit_mult = 0;
+        } else if (params.oomadj >= 700) {
+            soft_limit_mult = 0;
+        } else if (params.oomadj >= 600) {
+            // Launcher should be perceptible, don't kill it.
+            params.oomadj = 200;
+            soft_limit_mult = 1;
+        } else if (params.oomadj >= 500) {
+            soft_limit_mult = 0;
+        } else if (params.oomadj >= 400) {
+            soft_limit_mult = 0;
+        } else if (params.oomadj >= 300) {
+            soft_limit_mult = 1;
+        } else if (params.oomadj >= 200) {
+            soft_limit_mult = 2;
+        } else if (params.oomadj >= 100) {
+            soft_limit_mult = 10;
+        } else if (params.oomadj >=   0) {
+            soft_limit_mult = 20;
+        } else {
+            // Persistent processes will have a large
+            // soft limit 512MB.
+            soft_limit_mult = 64;
+        }
 
-    snprintf(path, sizeof(path),
+        snprintf(path, sizeof(path),
              "/dev/memcg/apps/uid_%d/pid_%d/memory.soft_limit_in_bytes",
              params.uid, params.pid);
-    snprintf(val, sizeof(val), "%d", soft_limit_mult * EIGHT_MEGA);
-    writefilestring(path, val);
+        snprintf(val, sizeof(val), "%d", soft_limit_mult * EIGHT_MEGA);
+        writefilestring(path, val);
+    }
 
     procp = pid_lookup(params.pid);
     if (!procp) {
@@ -1026,9 +1028,7 @@ static int find_and_kill_processes(enum vmpressure_level level,
     int pages_freed = 0;
 
 #ifdef LMKD_LOG_STATS
-    if (enable_stats_log) {
-        stats_write_lmk_state_changed(log_ctx, LMK_STATE_CHANGED, LMK_STATE_CHANGE_START);
-    }
+    bool lmk_state_change_start = false;
 #endif
 
     for (i = OOM_SCORE_ADJ_MAX; i >= min_score_adj; i--) {
@@ -1043,11 +1043,19 @@ static int find_and_kill_processes(enum vmpressure_level level,
 
             killed_size = kill_one_process(procp, min_score_adj, level);
             if (killed_size >= 0) {
+#ifdef LMKD_LOG_STATS
+                if (enable_stats_log && !lmk_state_change_start) {
+                    lmk_state_change_start = true;
+                    stats_write_lmk_state_changed(log_ctx, LMK_STATE_CHANGED,
+                                                  LMK_STATE_CHANGE_START);
+                }
+#endif
+
                 pages_freed += killed_size;
                 if (pages_freed >= pages_to_free) {
 
 #ifdef LMKD_LOG_STATS
-                    if (enable_stats_log) {
+                    if (enable_stats_log && lmk_state_change_start) {
                         stats_write_lmk_state_changed(log_ctx, LMK_STATE_CHANGED,
                                 LMK_STATE_CHANGE_STOP);
                     }
@@ -1059,7 +1067,7 @@ static int find_and_kill_processes(enum vmpressure_level level,
     }
 
 #ifdef LMKD_LOG_STATS
-    if (enable_stats_log) {
+    if (enable_stats_log && lmk_state_change_start) {
         stats_write_lmk_state_changed(log_ctx, LMK_STATE_CHANGED, LMK_STATE_CHANGE_STOP);
     }
 #endif
@@ -1178,10 +1186,8 @@ static void mp_event_common(int data, uint32_t events __unused) {
     }
 
     if (skip_count > 0) {
-        if (debug_process_killing) {
-            ALOGI("%lu memory pressure events were skipped after a kill!",
-                skip_count);
-        }
+        ALOGI("%lu memory pressure events were skipped after a kill!",
+              skip_count);
         skip_count = 0;
     }
 
@@ -1210,8 +1216,15 @@ static void mp_event_common(int data, uint32_t events __unused) {
             }
         }
 
-        if (min_score_adj == OOM_SCORE_ADJ_MAX + 1)
+        if (min_score_adj == OOM_SCORE_ADJ_MAX + 1) {
+            if (debug_process_killing) {
+                ALOGI("Ignore %s memory pressure event "
+                      "(free memory=%ldkB, cache=%ldkB, limit=%ldkB)",
+                      level_name[level], other_free * page_k, other_file * page_k,
+                      (long)lowmem_minfree[lowmem_targets_size - 1] * page_k);
+            }
             return;
+        }
 
         /* Free up enough pages to push over the highest minfree level */
         pages_to_free = lowmem_minfree[lowmem_targets_size - 1] -
@@ -1299,25 +1312,24 @@ do_kill:
                 return;
             }
             min_score_adj = level_oomadj[level];
-        } else {
-            if (debug_process_killing) {
-                ALOGI("Killing because cache %ldkB is below "
-                      "limit %ldkB for oom_adj %d\n"
-                      "   Free memory is %ldkB %s reserved",
-                      other_file * page_k, minfree * page_k, min_score_adj,
-                      other_free * page_k, other_free >= 0 ? "above" : "below");
-            }
         }
 
-        if (debug_process_killing) {
-            ALOGI("Trying to free %d pages", pages_to_free);
-        }
         pages_freed = find_and_kill_processes(level, min_score_adj, pages_to_free);
+
+        if (use_minfree_levels) {
+            ALOGI("Killing because cache %ldkB is below "
+                  "limit %ldkB for oom_adj %d\n"
+                  "   Free memory is %ldkB %s reserved",
+                  other_file * page_k, minfree * page_k, min_score_adj,
+                  other_free * page_k, other_free >= 0 ? "above" : "below");
+        }
+
         if (pages_freed < pages_to_free) {
-            if (debug_process_killing) {
-                ALOGI("Unable to free enough memory (pages freed=%d)", pages_freed);
-            }
+            ALOGI("Unable to free enough memory (pages to free=%d, pages freed=%d)",
+                  pages_to_free, pages_freed);
         } else {
+            ALOGI("Reclaimed enough memory (pages to free=%d, pages freed=%d)",
+                  pages_to_free, pages_freed);
             gettimeofday(&last_report_tm, NULL);
         }
     }
