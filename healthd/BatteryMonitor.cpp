@@ -256,8 +256,6 @@ bool BatteryMonitor::update(void) {
         getIntField(mHealthdConfig->batteryTemperaturePath);
 
     std::string buf;
-    const int SIZE = 128;
-    char buf2[SIZE];
 
     if (readFromFile(mHealthdConfig->batteryStatusPath, &buf) > 0)
         props.batteryStatus = getBatteryStatus(buf.c_str());
@@ -344,7 +342,7 @@ bool BatteryMonitor::update(void) {
 
     // BEGIN MOT, a18273, IKMODS-149
     props.modLevel = -1;
-    props.modStatus = BATTERY_STATUS_UNKNOWN;
+    props.modStatus =  BATTERY_STATUS_UNKNOWN;
     props.modType = POWER_SUPPLY_MOD_TYPE_UNKNOWN;
     //props.modPowerSource = 0;
     props.modFlag = 0;
@@ -409,7 +407,7 @@ bool BatteryMonitor::update(void) {
             props.modStatus == BATTERY_STATUS_UNKNOWN ||
             props.modType == POWER_SUPPLY_MOD_TYPE_UNKNOWN) {
         props.modLevel = -1;
-        props.modStatus == BATTERY_STATUS_UNKNOWN;
+        props.modStatus = BATTERY_STATUS_UNKNOWN;
         props.modType = POWER_SUPPLY_MOD_TYPE_UNKNOWN;
         //props.modPowerSource = 0;
         props.modFlag = 0;
