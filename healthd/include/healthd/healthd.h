@@ -67,15 +67,6 @@ struct healthd_config {
     android::String8 batteryChargeCounterPath;
     android::String8 batteryFullChargePath;
     android::String8 batteryCycleCountPath;
-	//Initial mods things
-    android::String8 modChargeFullPath;
-    android::String8 modCapacityPath;
-    android::String8 modStatusPath;
-    android::String8 modTypePath;
-    android::String8 modPowerSourcePath;
-    android::String8 modRechargeStartLevelPath;
-    android::String8 modRechargeStopLevelPath;
-	//end mods things
 
     int (*energyCounter)(int64_t *);
     int boot_min_cap;
