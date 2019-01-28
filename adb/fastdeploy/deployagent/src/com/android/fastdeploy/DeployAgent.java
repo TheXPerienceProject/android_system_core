@@ -35,7 +35,7 @@ import com.android.fastdeploy.PatchUtils;
 
 public final class DeployAgent {
     private static final int BUFFER_SIZE = 128 * 1024;
-    private static final int AGENT_VERSION = 0x00000001;
+    private static final int AGENT_VERSION = 0x00000002;
 
     public static void main(String[] args) {
         int exitCode = 0;
@@ -53,6 +53,15 @@ public final class DeployAgent {
 
                 String packageName = args[1];
                 extractMetaData(packageName);
+            } else if (commandString.equals("find")) {
+                if (args.length != 2) {
+                    showUsage(1);
+                }
+
+                String packageName = args[1];
+                if (getFilenameFromPackageName(packageName) == null) {
+                    exitCode = 3;
+                }
             } else if (commandString.equals("apply")) {
                 if (args.length < 4) {
                     showUsage(1);
@@ -112,6 +121,7 @@ public final class DeployAgent {
             "usage: deployagent <command> [<args>]\n\n" +
             "commands:\n" +
             "version                             get the version\n" +
+            "find PKGNAME                        return zero if package found, else non-zero\n" +
             "extract PKGNAME                     extract an installed package's metadata\n" +
             "apply PKGNAME PATCHFILE [-o|-pm]    apply a patch from PATCHFILE (- for stdin) to an installed package\n" +
             " -o <FILE> directs output to FILE, default or - for stdout\n" +
@@ -134,7 +144,7 @@ public final class DeployAgent {
         return null;
     }
 
-    private static File getFileFromPackageName(String packageName) throws IOException {
+    private static String getFilenameFromPackageName(String packageName) throws IOException {
         StringBuilder commandBuilder = new StringBuilder();
         commandBuilder.append("pm list packages -f " + packageName);
 
@@ -142,14 +152,30 @@ public final class DeployAgent {
         BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
 
         String packagePrefix = "package:";
+        String packageSuffix = "=" + packageName;
         String line = "";
         while ((line = reader.readLine()) != null) {
-            int packageIndex = line.indexOf(packagePrefix);
-            int equalsIndex = line.indexOf("=" + packageName);
-            return new File(line.substring(packageIndex + packagePrefix.length(), equalsIndex));
+            if (line.endsWith(packageSuffix)) {
+                int packageIndex = line.indexOf(packagePrefix);
+                if (packageIndex == -1) {
+                    throw new IOException("error reading package list");
+                }
+                int equalsIndex = line.lastIndexOf(packageSuffix);
+                String fileName =
+                    line.substring(packageIndex + packagePrefix.length(), equalsIndex);
+                return fileName;
+            }
         }
-
         return null;
+    }
+
+    private static File getFileFromPackageName(String packageName) throws IOException {
+        String filename = getFilenameFromPackageName(packageName);
+        if (filename == null) {
+            // Should not happen (function is only called when we know the package exists)
+            throw new IOException("package not found");
+        }
+        return new File(filename);
     }
 
     private static void extractMetaData(String packageName) throws IOException {

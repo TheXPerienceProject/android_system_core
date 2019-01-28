@@ -143,6 +143,11 @@ bool UpdateSuper(FastbootDevice* device, const std::string& super_name, bool wip
         return device->WriteFail("Data is not a valid logical partition metadata image");
     }
 
+    if (!FindPhysicalPartition(super_name)) {
+        return device->WriteFail("Cannot find " + super_name +
+                                 ", build may be missing broken or missing boot_devices");
+    }
+
     // If we are unable to read the existing metadata, then the super partition
     // is corrupt. In this case we reflash the whole thing using the provided
     // image.
@@ -153,6 +158,7 @@ bool UpdateSuper(FastbootDevice* device, const std::string& super_name, bool wip
         if (!FlashPartitionTable(super_name, *new_metadata.get())) {
             return device->WriteFail("Unable to flash new partition table");
         }
+        fs_mgr_overlayfs_teardown();
         return device->WriteOkay("Successfully flashed partition table");
     }
 
@@ -183,13 +189,9 @@ bool UpdateSuper(FastbootDevice* device, const std::string& super_name, bool wip
     }
 
     // Write the new table to every metadata slot.
-    bool ok = true;
-    for (size_t i = 0; i < new_metadata->geometry.metadata_slot_count; i++) {
-        ok &= UpdatePartitionTable(super_name, *new_metadata.get(), i);
-    }
-
-    if (!ok) {
+    if (!UpdateAllPartitionMetadata(device, super_name, *new_metadata.get())) {
         return device->WriteFail("Unable to write new partition table");
     }
+    fs_mgr_overlayfs_teardown();
     return device->WriteOkay("Successfully updated partition table");
 }

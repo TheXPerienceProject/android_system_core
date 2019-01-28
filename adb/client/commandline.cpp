@@ -146,18 +146,16 @@ static void help() {
         " install [-lrtsdg] [--instant] PACKAGE\n"
         " install-multiple [-lrtsdpg] [--instant] PACKAGE...\n"
         "     push package(s) to the device and install them\n"
-        "     -l: forward lock application\n"
         "     -r: replace existing application\n"
         "     -t: allow test packages\n"
-        "     -s: install application on sdcard\n"
         "     -d: allow version code downgrade (debuggable packages only)\n"
         "     -p: partial application install (install-multiple only)\n"
         "     -g: grant all runtime permissions\n"
         "     --instant: cause the app to be installed as an ephemeral install app\n"
         "     --no-streaming: always push APK to device and invoke Package Manager as separate steps\n"
         "     --streaming: force streaming APK directly into Package Manager\n"
-        "     --fastdeploy: use fast deploy (only valid with -r)\n"
-        "     --no-fastdeploy: prevent use of fast deploy (only valid with -r)\n"
+        "     --fastdeploy: use fast deploy\n"
+        "     --no-fastdeploy: prevent use of fast deploy\n"
         "     --force-agent: force update of deployment agent when using fast deploy\n"
         "     --date-check-agent: update deployment agent when local version is newer and using fast deploy\n"
         "     --version-check-agent: update deployment agent when local version has different version code and using fast deploy\n"
@@ -185,7 +183,6 @@ static void help() {
         " enable-verity            re-enable dm-verity checking on userdebug builds\n"
         " keygen FILE\n"
         "     generate adb public/private key; private key stored in FILE,\n"
-        "     public key stored in FILE.pub (existing files overwritten)\n"
         "\n"
         "scripting:\n"
         " wait-for[-TRANSPORT]-STATE\n"
@@ -1278,6 +1275,42 @@ static int adb_connect_command(const std::string& command) {
     return 0;
 }
 
+static int adb_connect_command_bidirectional(const std::string& command) {
+    std::string error;
+    int fd = adb_connect(command, &error);
+    if (fd < 0) {
+        fprintf(stderr, "error: %s\n", error.c_str());
+        return 1;
+    }
+
+    static constexpr auto forward = [](int src, int sink, bool exit_on_end) {
+        char buf[4096];
+        while (true) {
+            int rc = adb_read(src, buf, sizeof(buf));
+            if (rc == 0) {
+                if (exit_on_end) {
+                    exit(0);
+                } else {
+                    adb_shutdown(sink, SHUT_WR);
+                }
+                return;
+            } else if (rc < 0) {
+                perror_exit("read failed");
+            }
+            if (!WriteFdExactly(sink, buf, rc)) {
+                perror_exit("write failed");
+            }
+        }
+    };
+
+    std::thread read(forward, fd, STDOUT_FILENO, true);
+    std::thread write(forward, STDIN_FILENO, fd, false);
+    read.join();
+    write.join();
+    adb_close(fd);
+    return 0;
+}
+
 static int adb_query_command(const std::string& command) {
     std::string result;
     std::string error;
@@ -1756,29 +1789,27 @@ int adb_commandline(int argc, const char** argv) {
         // Always print key generation information for keygen command.
         adb_trace_enable(AUTH);
         return adb_auth_keygen(argv[1]);
-    }
-    else if (!strcmp(argv[0], "jdwp")) {
+    } else if (!strcmp(argv[0], "pubkey")) {
+        if (argc != 2) error_exit("pubkey requires an argument");
+        return adb_auth_pubkey(argv[1]);
+    } else if (!strcmp(argv[0], "jdwp")) {
         return adb_connect_command("jdwp");
-    }
-    else if (!strcmp(argv[0], "track-jdwp")) {
+    } else if (!strcmp(argv[0], "track-jdwp")) {
         return adb_connect_command("track-jdwp");
-    }
-    else if (!strcmp(argv[0], "track-devices")) {
+    } else if (!strcmp(argv[0], "track-devices")) {
         return adb_connect_command("host:track-devices");
     } else if (!strcmp(argv[0], "raw")) {
         if (argc != 2) {
             error_exit("usage: adb raw SERVICE");
         }
-        return adb_connect_command(argv[1]);
+        return adb_connect_command_bidirectional(argv[1]);
     }
-
 
     /* "adb /?" is a common idiom under Windows */
     else if (!strcmp(argv[0], "--help") || !strcmp(argv[0], "help") || !strcmp(argv[0], "/?")) {
         help();
         return 0;
-    }
-    else if (!strcmp(argv[0], "--version") || !strcmp(argv[0], "version")) {
+    } else if (!strcmp(argv[0], "--version") || !strcmp(argv[0], "version")) {
         fprintf(stdout, "%s", adb_version().c_str());
         return 0;
     } else if (!strcmp(argv[0], "features")) {

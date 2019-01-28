@@ -84,7 +84,6 @@ std::string SerializeMetadata(const LpMetadata& input) {
 // with potentially invalid metadata, or random partition data with metadata.
 static bool ValidateAndSerializeMetadata(const IPartitionOpener& opener, const LpMetadata& metadata,
                                          const std::string& slot_suffix, std::string* blob) {
-    const LpMetadataHeader& header = metadata.header;
     const LpMetadataGeometry& geometry = metadata.geometry;
 
     *blob = SerializeMetadata(metadata);
@@ -234,6 +233,10 @@ static bool WriteMetadata(int fd, const LpMetadata& metadata, uint32_t slot_numb
 static bool DefaultWriter(int fd, const std::string& blob) {
     return android::base::WriteFully(fd, blob.data(), blob.size());
 }
+
+#if defined(_WIN32)
+static const int O_SYNC = 0;
+#endif
 
 bool FlashPartitionTable(const IPartitionOpener& opener, const std::string& super_partition,
                          const LpMetadata& metadata) {
