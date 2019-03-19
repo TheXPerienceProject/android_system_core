@@ -47,6 +47,7 @@ using android::base::ReadFileToString;
 using android::base::Split;
 using android::base::Timer;
 using android::fs_mgr::AvbHandle;
+using android::fs_mgr::AvbHandleStatus;
 using android::fs_mgr::AvbHashtreeResult;
 using android::fs_mgr::AvbUniquePtr;
 using android::fs_mgr::BuildGsiSystemFstabEntry;
@@ -186,6 +187,29 @@ static bool GetRootEntry(FstabEntry* root_entry) {
         root_entry->fs_mgr_flags.verify = true;
     }
     return true;
+}
+
+static bool IsStandaloneImageRollback(const AvbHandle& builtin_vbmeta,
+                                      const AvbHandle& standalone_vbmeta,
+                                      const FstabEntry& fstab_entry) {
+    std::string old_spl = builtin_vbmeta.GetSecurityPatchLevel(fstab_entry);
+    std::string new_spl = standalone_vbmeta.GetSecurityPatchLevel(fstab_entry);
+
+    bool rollbacked = false;
+    if (old_spl.empty() || new_spl.empty() || new_spl < old_spl) {
+        rollbacked = true;
+    }
+
+    if (rollbacked) {
+        LOG(ERROR) << "Image rollback detected for " << fstab_entry.mount_point
+                   << ", SPL switches from '" << old_spl << "' to '" << new_spl << "'";
+        if (AvbHandle::IsDeviceUnlocked()) {
+            LOG(INFO) << "Allowing rollbacked standalone image when the device is unlocked";
+            return false;
+        }
+    }
+
+    return rollbacked;
 }
 
 // Class Definitions
@@ -736,9 +760,26 @@ bool FirstStageMountVBootV2::SetUpDmVerity(FstabEntry* fstab_entry) {
         if (!InitAvbHandle()) return false;
         hashtree_result =
                 avb_handle_->SetUpAvbHashtree(fstab_entry, false /* wait_for_verity_dev */);
-    } else if (!fstab_entry->avb_key.empty()) {
-        hashtree_result =
-                AvbHandle::SetUpStandaloneAvbHashtree(fstab_entry, false /* wait_for_verity_dev */);
+    } else if (!fstab_entry->avb_keys.empty()) {
+        if (!InitAvbHandle()) return false;
+        // Checks if hashtree should be disabled from the top-level /vbmeta.
+        if (avb_handle_->status() == AvbHandleStatus::kHashtreeDisabled ||
+            avb_handle_->status() == AvbHandleStatus::kVerificationDisabled) {
+            LOG(ERROR) << "Top-level vbmeta is disabled, skip Hashtree setup for "
+                       << fstab_entry->mount_point;
+            return true;  // Returns true to mount the partition directly.
+        } else {
+            auto avb_standalone_handle = AvbHandle::LoadAndVerifyVbmeta(*fstab_entry);
+            if (!avb_standalone_handle) {
+                LOG(ERROR) << "Failed to load offline vbmeta for " << fstab_entry->mount_point;
+                return false;
+            }
+            if (IsStandaloneImageRollback(*avb_handle_, *avb_standalone_handle, *fstab_entry)) {
+                return false;
+            }
+            hashtree_result = avb_standalone_handle->SetUpAvbHashtree(
+                    fstab_entry, false /* wait_for_verity_dev */);
+        }
     } else {
         return true;  // No need AVB, returns true to mount the partition directly.
     }
@@ -754,8 +795,6 @@ bool FirstStageMountVBootV2::SetUpDmVerity(FstabEntry* fstab_entry) {
         default:
             return false;
     }
-
-    return true;  // Returns true to mount the partition.
 }
 
 bool FirstStageMountVBootV2::InitAvbHandle() {
