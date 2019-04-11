@@ -155,7 +155,7 @@ void SysfsPermissions::SetPermissions(const std::string& path) const {
 
         int fts_options = FTS_COMFOLLOW | FTS_LOGICAL | FTS_NOCHDIR | FTS_NOSTAT;
         if ((ftsp = fts_open(dirs, fts_options, NULL)) == NULL) {
-            continue;
+            return;
         }
 
         while ((entp = fts_read(ftsp)) != NULL) {
