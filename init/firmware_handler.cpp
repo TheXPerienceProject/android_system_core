@@ -187,9 +187,6 @@ static void ProcessFirmwareEvent(const Uevent& uevent) {
         return;
     }
 
-    static const char* firmware_dirs[] = {"/etc/firmware/", "/odm/firmware/",
-                                          "/vendor/firmware/", "/firmware/image/"};
-
 try_loading_again:
     for (const auto& firmware_directory : firmware_directories) {
         std::string file = firmware_directory + uevent.firmware;
