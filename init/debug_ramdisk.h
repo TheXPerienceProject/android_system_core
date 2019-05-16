@@ -1,7 +1,5 @@
-#pragma once
-
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2019 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +14,13 @@
  * limitations under the License.
  */
 
-#include <memory>
-#include <string>
+#pragma once
 
-#include <unwindstack/Regs.h>
+namespace android {
+namespace init {
 
-struct ThreadInfo {
-  std::unique_ptr<unwindstack::Regs> registers;
+constexpr const char kDebugRamdiskProp[] = "/debug_ramdisk/adb_debug.prop";
+constexpr const char kDebugRamdiskSEPolicy[] = "/debug_ramdisk/userdebug_plat_sepolicy.cil";
 
-  pid_t uid;
-
-  pid_t tid;
-  std::string thread_name;
-
-  pid_t pid;
-  std::string process_name;
-
-  int signo = 0;
-  siginfo_t* siginfo = nullptr;
-};
+}  // namespace init
+}  // namespace android
