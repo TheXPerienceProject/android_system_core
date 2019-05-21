@@ -139,7 +139,11 @@ bool fs_mgr_filesystem_has_space(const std::string& mount_point) {
     // If we have access issues to find out space remaining, return true
     // to prevent us trying to override with overlayfs.
     struct statvfs vst;
-    if (statvfs(mount_point.c_str(), &vst)) return true;
+    auto save_errno = errno;
+    if (statvfs(mount_point.c_str(), &vst)) {
+        errno = save_errno;
+        return true;
+    }
 
     static constexpr int kPercentThreshold = 1;  // 1%
 
@@ -262,9 +266,11 @@ bool fs_mgr_rw_access(const std::string& path) {
 
 bool fs_mgr_overlayfs_already_mounted(const std::string& mount_point, bool overlay_only = true) {
     Fstab fstab;
+    auto save_errno = errno;
     if (!ReadFstabFromFile("/proc/mounts", &fstab)) {
         return false;
     }
+    errno = save_errno;
     const auto lowerdir = kLowerdirOption + mount_point;
     for (const auto& entry : fstab) {
         if (overlay_only && "overlay" != entry.fs_type && "overlayfs" != entry.fs_type) continue;
@@ -715,7 +721,7 @@ bool fs_mgr_overlayfs_create_scratch(const Fstab& fstab, std::string* scratch_de
     }
 
     if (changed || partition_create) {
-        if (!CreateLogicalPartition(super_device, slot_number, partition_name, true, 0s,
+        if (!CreateLogicalPartition(super_device, slot_number, partition_name, true, 10s,
                                     scratch_device))
             return false;
 
@@ -940,7 +946,7 @@ bool fs_mgr_overlayfs_teardown(const char* mount_point, bool* change) {
             auto slot_number = fs_mgr_overlayfs_slot_number();
             auto super_device = fs_mgr_overlayfs_super_device(slot_number);
             const auto partition_name = android::base::Basename(kScratchMountPoint);
-            CreateLogicalPartition(super_device, slot_number, partition_name, true, 0s,
+            CreateLogicalPartition(super_device, slot_number, partition_name, true, 10s,
                                    &scratch_device);
         }
         mount_scratch = fs_mgr_overlayfs_mount_scratch(scratch_device,
