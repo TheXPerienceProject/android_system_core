@@ -139,7 +139,11 @@ bool fs_mgr_filesystem_has_space(const std::string& mount_point) {
     // If we have access issues to find out space remaining, return true
     // to prevent us trying to override with overlayfs.
     struct statvfs vst;
-    if (statvfs(mount_point.c_str(), &vst)) return true;
+    auto save_errno = errno;
+    if (statvfs(mount_point.c_str(), &vst)) {
+        errno = save_errno;
+        return true;
+    }
 
     static constexpr int kPercentThreshold = 1;  // 1%
 
@@ -159,6 +163,9 @@ bool fs_mgr_overlayfs_enabled(FstabEntry* entry) {
     auto save_errno = errno;
     errno = 0;
     auto has_shared_blocks = fs_mgr_has_shared_blocks(entry->mount_point, entry->blk_device);
+    if (!has_shared_blocks && (entry->mount_point == "/system")) {
+        has_shared_blocks = fs_mgr_has_shared_blocks("/", entry->blk_device);
+    }
     // special case for first stage init for system as root (taimen)
     if (!has_shared_blocks && (errno == ENOENT) && (entry->blk_device == "/dev/root")) {
         has_shared_blocks = true;
@@ -262,9 +269,11 @@ bool fs_mgr_rw_access(const std::string& path) {
 
 bool fs_mgr_overlayfs_already_mounted(const std::string& mount_point, bool overlay_only = true) {
     Fstab fstab;
+    auto save_errno = errno;
     if (!ReadFstabFromFile("/proc/mounts", &fstab)) {
         return false;
     }
+    errno = save_errno;
     const auto lowerdir = kLowerdirOption + mount_point;
     for (const auto& entry : fstab) {
         if (overlay_only && "overlay" != entry.fs_type && "overlayfs" != entry.fs_type) continue;
@@ -631,7 +640,7 @@ bool fs_mgr_overlayfs_make_scratch(const std::string& scratch_device, const std:
         LERROR << mnt_type << " has no mkfs cookbook";
         return false;
     }
-    command += " " + scratch_device;
+    command += " " + scratch_device + " >/dev/null 2>/dev/null </dev/null";
     fs_mgr_set_blk_ro(scratch_device, false);
     auto ret = system(command.c_str());
     if (ret) {
