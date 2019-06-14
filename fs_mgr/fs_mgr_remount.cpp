@@ -250,7 +250,6 @@ int main(int argc, char* argv[]) {
     // Check verity and optionally setup overlayfs backing.
     auto reboot_later = false;
     auto uses_overlayfs = fs_mgr_overlayfs_valid() != OverlayfsValidResult::kNotSupported;
-    auto just_disabled_verity = false;
     for (auto it = partitions.begin(); it != partitions.end();) {
         auto& entry = *it;
         auto& mount_point = entry.mount_point;
@@ -263,8 +262,7 @@ int main(int argc, char* argv[]) {
                             false);
                     avb_ops_user_free(ops);
                     if (ret) {
-                        LOG(WARNING) << "Disabling verity for " << mount_point;
-                        just_disabled_verity = true;
+                        LOG(WARNING) << "Disable verity for " << mount_point;
                         reboot_later = can_reboot;
                         if (reboot_later) {
                             // w/o overlayfs available, also check for dedupe
@@ -277,8 +275,7 @@ int main(int argc, char* argv[]) {
                     } else if (fs_mgr_set_blk_ro(entry.blk_device, false)) {
                         fec::io fh(entry.blk_device.c_str(), O_RDWR);
                         if (fh && fh.set_verity_status(false)) {
-                            LOG(WARNING) << "Disabling verity for " << mount_point;
-                            just_disabled_verity = true;
+                            LOG(WARNING) << "Disable verity for " << mount_point;
                             reboot_later = can_reboot;
                             if (reboot_later && !uses_overlayfs) {
                                 ++it;
@@ -295,7 +292,7 @@ int main(int argc, char* argv[]) {
 
         auto change = false;
         errno = 0;
-        if (fs_mgr_overlayfs_setup(nullptr, mount_point.c_str(), &change, just_disabled_verity)) {
+        if (fs_mgr_overlayfs_setup(nullptr, mount_point.c_str(), &change)) {
             if (change) {
                 LOG(INFO) << "Using overlayfs for " << mount_point;
             }
