@@ -38,9 +38,12 @@
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
-#include <cutils/android_reboot.h>
 #include <fs_avb/fs_avb.h>
+#include <fs_mgr.h>
+#include <fs_mgr_dm_linear.h>
+#include <fs_mgr_overlayfs.h>
 #include <fs_mgr_vendor_overlay.h>
+
 #include <keyutils.h>
 #include <libavb/libavb.h>
 #include <libgsi/libgsi.h>
@@ -79,9 +82,19 @@ using android::base::StringPrintf;
 using android::base::Timer;
 using android::base::Trim;
 using android::fs_mgr::AvbHandle;
+using android::fs_mgr::Fstab;
+using android::fs_mgr::ReadDefaultFstab;
 
 namespace android {
 namespace init {
+
+namespace {
+bool DeferOverlayfsMount() {
+    std::string cmdline;
+    android::base::ReadFileToString("/proc/cmdline", &cmdline);
+    return cmdline.find("androidboot.defer_overlayfs_mount=1") != std::string::npos;
+}
+}
 
 static int property_triggers_enabled = 0;
 
@@ -606,17 +619,6 @@ void HandleKeychord(const std::vector<int>& keycodes) {
     }
 }
 
-static void InitAborter(const char* abort_message) {
-    // When init forks, it continues to use this aborter for LOG(FATAL), but we want children to
-    // simply abort instead of trying to reboot the system.
-    if (getpid() != 1) {
-        android::base::DefaultAborter(abort_message);
-        return;
-    }
-
-    RebootSystem(ANDROID_RB_RESTART2, "bootloader");
-}
-
 static void GlobalSeccomp() {
     import_kernel_cmdline(false, [](const std::string& key, const std::string& value,
                                     bool in_qemu) {
@@ -637,9 +639,23 @@ int SecondStageMain(int argc, char** argv) {
         InstallRebootSignalHandlers();
     }
 
-    // We need to set up stdin/stdout/stderr again now that we're running in init's context.
-    InitKernelLogging(argv, InitAborter);
+    SetStdioToDevNull(argv);
+    InitKernelLogging(argv);
     LOG(INFO) << "init second stage started!";
+
+    if (DeferOverlayfsMount()) {
+        Fstab fstab;
+        if (ReadDefaultFstab(&fstab)) {
+            fstab.erase(std::remove_if(fstab.begin(), fstab.end(),
+                                       [](const auto& entry) {
+                                           return !entry.fs_mgr_flags.first_stage_mount;
+                                       }),
+                        fstab.end());
+            LOG(INFO) << "Running deferred mounting of overlayfs";
+            fs_mgr_overlayfs_mount_all(&fstab);
+        }
+
+    }
 
     // Set init and its forked children's oom_adj.
     if (auto result = WriteFile("/proc/1/oom_score_adj", "-1000"); !result) {
