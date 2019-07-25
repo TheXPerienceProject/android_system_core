@@ -82,6 +82,7 @@
 #define ZONEINFO_PATH "/proc/zoneinfo"
 #define MEMINFO_PATH "/proc/meminfo"
 #define LINE_MAX 128
+#define MAX_NR_ZONES 6
 
 /* Android Logger event logtags (see event.logtags) */
 #define MEMINFO_LOG_TAG 10195355
@@ -162,6 +163,7 @@ static bool per_app_memcg;
 static bool enhance_batch_kill;
 static bool enable_adaptive_lmk;
 static bool enable_userspace_lmk;
+static bool enable_watermark_check;
 static int swap_free_low_percentage;
 static bool use_psi_monitors = false;
 static struct psi_threshold psi_thresholds[VMPRESS_LEVEL_COUNT] = {
@@ -318,6 +320,19 @@ enum field_match_result {
     NO_MATCH,
     PARSE_FAIL,
     PARSE_SUCCESS
+};
+
+struct watermark_info {
+    char name[LINE_MAX];
+    int free;
+    int high;
+    int cma;
+    int present;
+    int lowmem_reserve[MAX_NR_ZONES];
+    int inactive_anon;
+    int active_anon;
+    int inactive_file;
+    int active_file;
 };
 
 struct adjslot_list {
@@ -1223,6 +1238,141 @@ static void meminfo_log(union meminfo *mi) {
     android_log_reset(ctx);
 }
 
+/*
+ * no strtok_r since that modifies buffer and we want to use multiline sscanf
+ */
+static char *nextln(char *buf)
+{
+    char *x;
+
+    x = memchr(buf, '\n', strlen(buf));
+    if (!x)
+        return buf + strlen(buf);
+    return x + 1;
+}
+
+static int parse_one_zone_watermark(char *buf, struct watermark_info *w)
+{
+    char *start = buf;
+    int nargs;
+    int ret = 0;
+
+    while (*buf) {
+        nargs = sscanf(buf, "Node %*u, zone %" STRINGIFY(LINE_MAX) "s", w->name);
+        buf = nextln(buf);
+        if (nargs == 1) {
+            break;
+        }
+    }
+
+    while(*buf) {
+        nargs = sscanf(buf,
+                    " pages free %d"
+                    " min %*d"
+                    " low %*d"
+                    " high %d"
+                    " spanned %*d"
+                    " present %d"
+                    " managed %*d",
+                    &w->free, &w->high, &w->present);
+        buf = nextln(buf);
+        if (nargs == 3) {
+            break;
+        }
+    }
+
+    while(*buf) {
+        nargs = sscanf(buf,
+                    " protection: (%d, %d, %d, %d, %d, %d)",
+                    &w->lowmem_reserve[0], &w->lowmem_reserve[1],
+                    &w->lowmem_reserve[2], &w->lowmem_reserve[3],
+                    &w->lowmem_reserve[4], &w->lowmem_reserve[5]);
+        buf = nextln(buf);
+        if (nargs >= 1) {
+            break;
+        }
+    }
+
+    while(*buf) {
+        nargs = sscanf(buf,
+                    " nr_zone_inactive_anon %d"
+                    " nr_zone_active_anon %d"
+                    " nr_zone_inactive_file %d"
+                    " nr_zone_active_file %d",
+                    &w->inactive_anon, &w->active_anon,
+                    &w->inactive_file, &w->active_file);
+        buf = nextln(buf);
+        if (nargs == 4) {
+            break;
+        }
+    }
+
+    while (*buf) {
+        nargs = sscanf(buf, " nr_free_cma %u", &w->cma);
+        buf = nextln(buf);
+        if (nargs == 1) {
+            ret = buf - start;
+            break;
+        }
+    }
+
+    return ret;
+}
+
+/*
+ * Returns true on parsing error.
+ */
+static bool zone_watermarks_ok()
+{
+    static struct reread_data file_data = {
+        .filename = ZONEINFO_PATH,
+        .fd = -1,
+    };
+    char buf[2 * PAGE_SIZE];
+    char *offset;
+    struct watermark_info w;
+    int zone_id, i, nr;
+    bool lowmem_reserve_ok[MAX_NR_ZONES];
+
+    if (reread_file(&file_data, buf, sizeof(buf)) < 0) {
+        return true;
+    }
+
+    memset(&w, 0, sizeof(w));
+    memset(&lowmem_reserve_ok, 0, sizeof(lowmem_reserve_ok));
+    offset = buf;
+    for (zone_id = 0; zone_id < MAX_NR_ZONES; zone_id++) {
+        int margin;
+
+        nr = parse_one_zone_watermark(offset, &w);
+        if (!nr)
+            break;
+
+        offset += nr;
+        ALOGD("Zone %s: free:%d high:%d cma:%d reserve:(%d %d %d) anon:(%d %d) file:(%d %d)\n",
+                w.name, w.free, w.high, w.cma,
+                w.lowmem_reserve[0], w.lowmem_reserve[1], w.lowmem_reserve[2],
+                w.inactive_anon, w.active_anon, w.inactive_file, w.active_file);
+
+        /* Zone is empty */
+        if (!w.present)
+            continue;
+
+        margin = w.free - w.cma - w.high;
+        for (i = 0; i < MAX_NR_ZONES; i++)
+            if (w.lowmem_reserve[i] && (margin > w.lowmem_reserve[i]))
+                lowmem_reserve_ok[i] = true;
+
+        if (margin < 0 && !lowmem_reserve_ok[zone_id])
+            return false;
+    }
+
+    if (offset == buf)
+        ALOGE("Parsing watermarks failed in %s", file_data.filename);
+
+    return true;
+}
+
 static int proc_get_size(int pid) {
     char path[PATH_MAX];
     char line[LINE_MAX];
@@ -1335,6 +1485,84 @@ static void set_process_group_and_prio(int pid, SchedPolicy sp, int prio) {
     closedir(d);
 }
 
+/*
+ * Allow lmkd to "find" shell scripts with oom_score_adj >= 0
+ * Since we are not informed when a shell script exit, the generated
+ * list may be obsolete. This case is handled by the loop in
+ * find_and_kill_processes.
+ */
+static void proc_get_script(void)
+{
+    DIR* d;
+    struct dirent* de;
+    char path[PATH_MAX];
+    static char line[LINE_MAX];
+    ssize_t len;
+    int fd, oomadj = OOM_SCORE_ADJ_MIN;
+    uint32_t pid;
+    struct proc *procp;
+    int rss;
+    int count = 0;
+
+    if (!(d = opendir("/proc"))) {
+        ALOGE("Failed to open /proc");
+        return;
+    }
+
+    while ((de = readdir(d))) {
+        if (sscanf(de->d_name, "%u", &pid) != 1)
+            continue;
+
+        /* Don't attempt to kill init */
+        if (pid == 1)
+            continue;
+
+        /* Don't attempt to kill kthreads */
+        rss = proc_get_size(pid);
+        if (rss <= 0)
+            continue;
+
+        snprintf(path, sizeof(path), "/proc/%u/oom_score_adj", pid);
+        fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0)
+            continue;
+
+        len = read_all(fd, line, sizeof(line) - 1);
+        close(fd);
+
+        if (len < 0)
+            continue;
+
+        line[LINE_MAX - 1] = '\0';
+
+        if (sscanf(line, "%d", &oomadj) != 1) {
+            ALOGE("Parsing oomadj %s failed", line);
+            continue;
+        }
+
+        if (oomadj < 0)
+            continue;
+
+        procp = pid_lookup(pid);
+        if (!procp) {
+            procp = malloc(sizeof(*procp));
+            if (!procp)
+                break;
+
+            procp->pid = pid;
+            procp->uid = 0;
+            procp->oomadj = oomadj;
+            proc_insert(procp);
+            count++;
+        } else {
+            ALOGD("Entry already exists %d: %s\n", procp->pid, proc_get_name(pid));
+        }
+    }
+    closedir(d);
+
+    ALOGI("proc_get_script: Added %d tasks to kill list", count);
+}
+
 static int last_killed_pid = -1;
 
 /* Kill one process specified by procp.  Returns the size of the process killed */
@@ -1382,8 +1610,8 @@ static int kill_one_process(struct proc* procp, int min_oom_score) {
     set_process_group_and_prio(pid, SP_FOREGROUND, ANDROID_PRIORITY_HIGHEST);
 
     inc_killcnt(procp->oomadj);
-    ALOGI("Kill '%s' (%d), uid %d, oom_adj %d to free %ldkB",
-        taskname, pid, uid, procp->oomadj, tasksize * page_k);
+    ALOGE("Kill '%s' (%d), uid %d, oom_adj %d to free %ldkB", taskname, pid, uid, procp->oomadj,
+          tasksize * page_k);
 
     TRACE_KILL_END();
 
@@ -1424,11 +1652,13 @@ out:
 static int find_and_kill_process(int min_score_adj) {
     int i;
     int killed_size = 0;
+    bool can_retry = true;
 
 #ifdef LMKD_LOG_STATS
     bool lmk_state_change_start = false;
 #endif
 
+retry:
     for (i = OOM_SCORE_ADJ_MAX; i >= min_score_adj; i--) {
         struct proc *procp;
 
@@ -1454,6 +1684,12 @@ static int find_and_kill_process(int min_score_adj) {
         if (killed_size) {
             break;
         }
+    }
+
+    if (!killed_size && !min_score_adj && can_retry) {
+        proc_get_script();
+        can_retry = false;
+        goto retry;
     }
 
 #ifdef LMKD_LOG_STATS
@@ -1713,14 +1949,21 @@ do_kill:
         static unsigned long report_skip_count = 0;
 
         if (!use_minfree_levels) {
-            /* Free up enough memory to downgrate the memory pressure to low level */
-            if (mi.field.nr_free_pages >= low_pressure_mem.max_nr_free_pages) {
-                if (debug_process_killing) {
-                    ALOGI("Ignoring pressure since more memory is "
-                        "available (%" PRId64 ") than watermark (%" PRId64 ")",
-                        mi.field.nr_free_pages, low_pressure_mem.max_nr_free_pages);
+            if (!enable_watermark_check) {
+                /* Free up enough memory to downgrate the memory pressure to low level */
+                if (mi.field.nr_free_pages >= low_pressure_mem.max_nr_free_pages) {
+                    if (debug_process_killing) {
+                        ALOGI("Ignoring pressure since more memory is "
+                            "available (%" PRId64 ") than watermark (%" PRId64 ")",
+                            mi.field.nr_free_pages, low_pressure_mem.max_nr_free_pages);
+                    }
+                    return;
                 }
-                return;
+            } else {
+                if (zone_watermarks_ok()) {
+                    ALOGI("Ignoring pressure since per-zone watermarks ok");
+                    return;
+                }
             }
             min_score_adj = level_oomadj[level];
         }
@@ -2022,6 +2265,9 @@ static void mainloop(void) {
                 handler_info->handler(handler_info->data, evt->events);
 
                 if (use_psi_monitors && handler_info->handler == mp_event_common) {
+                    if (polling && handler_info->data < poll_handler->data)
+                        continue;
+
                     /*
                      * Poll for the duration of PSI_WINDOW_SIZE_MS after the
                      * initial PSI event because psi events are rate-limited
@@ -2068,6 +2314,8 @@ int main(int argc __unused, char **argv __unused) {
         property_get_bool("ro.config.per_app_memcg", low_ram_device);
     swap_free_low_percentage =
         property_get_int32("ro.lmk.swap_free_low_percentage", 10);
+    enable_watermark_check =
+        property_get_bool("ro.lmk.enable_watermark_check", false);
 
      /* Loading the vendor library at runtime to access property value */
      PropVal (*perf_wait_get_prop)(const char *, const char *) = NULL;
