@@ -123,6 +123,7 @@
 
 #define FAIL_REPORT_RLIMIT_MS 1000
 
+#define PSI_PROC_TRAVERSE_DELAY_MS 200
 /* default to old in-kernel interface if no memory pressure events */
 static bool use_inkernel_interface = true;
 static bool has_inkernel_module;
@@ -1407,12 +1408,12 @@ static int zone_watermarks_ok()
     return min_score_adj;
 }
 
-static int proc_get_size(int pid) {
+static long proc_get_rss(int pid) {
     char path[PATH_MAX];
     char line[LINE_MAX];
     int fd;
-    int rss = 0;
-    int total;
+    long rss = 0;
+    long total;
     ssize_t ret;
 
     /* gid containing AID_READPROC required */
@@ -1427,9 +1428,83 @@ static int proc_get_size(int pid) {
         return -1;
     }
 
-    sscanf(line, "%d %d ", &total, &rss);
+    sscanf(line, "%ld %ld ", &total, &rss);
     close(fd);
     return rss;
+}
+
+static bool parse_vmswap(char *buf, long *data) {
+
+	if(sscanf(buf, "VmSwap: %ld", data) == 1)
+		return 1;
+
+	return 0;
+}
+
+static long proc_get_swap(int pid) {
+	char buf[PAGE_SIZE] = {0, };
+	char path[PATH_MAX] = {0, };
+	char line[LINE_MAX] = {0, };
+	ssize_t ret;
+	char *c, *save_ptr;
+	int fd;
+	long data;
+
+	snprintf(path, PATH_MAX, "/proc/%d/status", pid);
+	fd = open(path,  O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return 0;
+
+	ret = read_all(fd, buf, sizeof(buf) - 1);
+	if (ret < 0) {
+		ALOGE("unable to read Vm status");
+		data = 0;
+		goto out;
+	}
+
+	for(c = strtok_r(buf, "\n", &save_ptr); c;
+		c = strtok_r(NULL, "\n", &save_ptr)) {
+		if (parse_vmswap(c, &data))
+			goto out;
+	}
+
+	ALOGE("Couldn't get Swap info. Is it kthread?");
+	data = 0;
+out:
+	close(fd);
+	/* Vmswap is in Kb. Convert to page size. */
+	return (data >> 2);
+}
+
+static long proc_get_size(int pid)
+{
+	long size;
+
+	return (size = proc_get_rss(pid)) ? size : proc_get_swap(pid);
+}
+
+static long proc_get_vm(int pid) {
+    char path[PATH_MAX];
+    char line[LINE_MAX];
+    int fd;
+    long total;
+    ssize_t ret;
+
+    /* gid containing AID_READPROC required */
+    snprintf(path, PATH_MAX, "/proc/%d/statm", pid);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd == -1)
+        return -1;
+
+    ret = read_all(fd, line, sizeof(line) - 1);
+    if (ret < 0) {
+        close(fd);
+        return -1;
+    }
+
+    sscanf(line, "%ld", &total);
+    close(fd);
+    return total;
 }
 
 static char *proc_get_name(int pid) {
@@ -1474,14 +1549,14 @@ static struct proc *proc_get_heaviest(int oomadj) {
 
     while (curr != head) {
         int pid = ((struct proc *)curr)->pid;
-        int tasksize = proc_get_size(pid);
+        long tasksize = proc_get_size(pid);
         if (tasksize <= 0) {
             struct adjslot_list *next = curr->next;
             pid_remove(pid);
             curr = next;
         } else {
             tmp_taskname = proc_get_name(pid);
-            if (enable_preferred_apps && strstr(preferred_apps, tmp_taskname)) {
+            if (enable_preferred_apps && tmp_taskname != NULL && strstr(preferred_apps, tmp_taskname)) {
                 if (tasksize > maxsize_pa) {
                     maxsize_pa = tasksize;
                     maxprocp_pa = (struct proc *)curr;
@@ -1545,7 +1620,7 @@ static void set_process_group_and_prio(int pid, SchedPolicy sp, int prio) {
  */
 static void proc_get_script(void)
 {
-    DIR* d;
+    static DIR* d = NULL;
     struct dirent* de;
     char path[PATH_MAX];
     static char line[LINE_MAX];
@@ -1553,10 +1628,20 @@ static void proc_get_script(void)
     int fd, oomadj = OOM_SCORE_ADJ_MIN;
     uint32_t pid;
     struct proc *procp;
-    int rss;
-    int count = 0;
+    long total_vm;
+    static bool retry_eligible = false;
+    struct timespec curr_tm;
+    static struct timespec last_traverse_time;
+    static bool check_time = false;
 
-    if (!(d = opendir("/proc"))) {
+    if(check_time) {
+	    clock_gettime(CLOCK_MONOTONIC_COARSE, &curr_tm);
+	    if (get_time_diff_ms(&last_traverse_time, &curr_tm) <
+			    PSI_PROC_TRAVERSE_DELAY_MS)
+		    return;
+    }
+repeat:
+    if (!d && !(d = opendir("/proc"))) {
         ALOGE("Failed to open /proc");
         return;
     }
@@ -1569,9 +1654,11 @@ static void proc_get_script(void)
         if (pid == 1)
             continue;
 
-        /* Don't attempt to kill kthreads */
-        rss = proc_get_size(pid);
-        if (rss <= 0)
+        /*
+	 * Don't attempt to kill kthreads. Rely on total_vm for this.
+	 */
+        total_vm = proc_get_vm(pid);
+        if (total_vm <= 0)
             continue;
 
         snprintf(path, sizeof(path), "/proc/%u/oom_score_adj", pid);
@@ -1605,14 +1692,23 @@ static void proc_get_script(void)
             procp->uid = 0;
             procp->oomadj = oomadj;
             proc_insert(procp);
-            count++;
+	    retry_eligible = true;
+	    check_time = false;
+	    ALOGI("proc_get_script: Added a task to kill list");
+	    return;
         } else {
             ALOGD("Entry already exists %d: %s\n", procp->pid, proc_get_name(pid));
         }
     }
     closedir(d);
-
-    ALOGI("proc_get_script: Added %d tasks to kill list", count);
+    d = NULL;
+    if (retry_eligible) {
+	    retry_eligible = false;
+	    goto repeat;
+    }
+    check_time = true;
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &last_traverse_time);
+    ALOGI("proc_get_script: None tasks are added to kill list");
 }
 
 static int last_killed_pid = -1;
@@ -1622,7 +1718,7 @@ static int kill_one_process(struct proc* procp, int min_oom_score) {
     int pid = procp->pid;
     uid_t uid = procp->uid;
     char *taskname;
-    int tasksize;
+    long tasksize;
     int r;
     int result = -1;
 
