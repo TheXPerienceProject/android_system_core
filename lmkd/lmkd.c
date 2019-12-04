@@ -2070,8 +2070,8 @@ static void mp_event_common(int data, uint32_t events __unused) {
 
     // If we still have enough swap space available, check if we want to
     // ignore/downgrade pressure events.
-    if (mi.field.free_swap >=
-        mi.field.total_swap * swap_free_low_percentage / 100) {
+    if (mi.field.total_swap && (mi.field.free_swap >=
+        mi.field.total_swap * swap_free_low_percentage / 100)) {
         // If the pressure is larger than downgrade_pressure lmk will not
         // kill any process, since enough memory is available.
         if (mem_pressure > downgrade_pressure) {
@@ -2380,7 +2380,7 @@ static void mainloop(void) {
             if (get_time_diff_ms(&last_report_tm, &curr_tm) >= PSI_POLL_PERIOD_MS) {
                 polling--;
                 poll_handler->handler(poll_handler->data, 0);
-                last_report_tm = curr_tm;
+                clock_gettime(CLOCK_MONOTONIC_COARSE, &last_report_tm);
             }
         } else {
             /* Wait for events with no timeout */
