@@ -83,6 +83,7 @@
 #define MEMCG_MEMORYSW_USAGE "/dev/memcg/memory.memsw.usage_in_bytes"
 #define ZONEINFO_PATH "/proc/zoneinfo"
 #define MEMINFO_PATH "/proc/meminfo"
+#define PROC_STATUS_TGID_FIELD "Tgid:"
 #define TRACE_MARKER_PATH "/sys/kernel/debug/tracing/trace_marker"
 #define LINE_MAX 128
 #define MAX_NR_ZONES 6
