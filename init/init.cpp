@@ -702,14 +702,24 @@ int SecondStageMain(int argc, char** argv) {
     bool memcg_enabled = android::base::GetBoolProperty("ro.boot.memcg",false);
     if (memcg_enabled) {
        // root memory control cgroup
-       mkdir("/dev/memcg", 0700);
-       chown("/dev/memcg",AID_ROOT,AID_SYSTEM);
+       mkdir("/dev/memcg", 0755);
+       chown("/dev/memcg",AID_SYSTEM,AID_SYSTEM);
        mount("none", "/dev/memcg", "cgroup", 0, "memory");
        // app mem cgroups, used by activity manager, lmkd and zygote
        mkdir("/dev/memcg/apps/",0755);
        chown("/dev/memcg/apps/",AID_SYSTEM,AID_SYSTEM);
        mkdir("/dev/memcg/system",0550);
        chown("/dev/memcg/system",AID_SYSTEM,AID_SYSTEM);
+       if (auto result = WriteFile("/dev/memcg/memory.swappiness", "100"); !result) {
+           LOG(ERROR) << "Unable to write 100 to /dev/memcg/memory.swappiness" << result.error();
+       }
+       if (auto result = WriteFile("/dev/memcg/apps/memory.swappiness", "100"); !result) {
+           LOG(ERROR) << "Unable to write 100 to /dev/memcg/memory.swappiness" << result.error();
+       }
+       if (auto result = WriteFile("/dev/memcg/system/memory.swappiness", "100"); !result) {
+           LOG(ERROR) << "Unable to write 100 to /dev/memcg/memory.swappiness" << result.error();
+       }
+
     }
 
     // Clean up our environment.
