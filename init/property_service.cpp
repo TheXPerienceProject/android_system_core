@@ -1208,6 +1208,8 @@ static void HandleInitSocket() {
             }
             InitPropertySet("ro.persistent_properties.ready", "true");
             persistent_properties_loaded = true;
+	    /*check for coredump*/	
+	    check_rlim_action();
             break;
         }
         case InitMessage::kStopSendingMessages: {
