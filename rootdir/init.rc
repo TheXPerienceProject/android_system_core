@@ -143,6 +143,14 @@ on init
     chmod 0664 /dev/stune/top-app/tasks
     chmod 0664 /dev/stune/rt/tasks
 
+    # Create a cpu group for NNAPI HAL processes
+    mkdir /dev/cpuctl/nnapi-hal
+    chown system system /dev/cpuctl/nnapi-hal
+    chown system system /dev/cpuctl/nnapi-hal/tasks
+    chmod 0664 /dev/cpuctl/nnapi-hal/tasks
+    write /dev/cpuctl/nnapi-hal/cpu.uclamp.min 1
+    write /dev/cpuctl/nnapi-hal/cpu.uclamp.latency_sensitive 1
+
     # Create an stune group for NNAPI HAL processes
     mkdir /dev/stune/nnapi-hal
     chown system system /dev/stune/nnapi-hal
