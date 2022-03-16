@@ -842,8 +842,10 @@ static int __mount(const std::string& source, const std::string& target, const F
         fs_mgr_set_blk_ro(source);
     }
 #endif
-    android::base::SetProperty("ro.boottime.init.mount." + Basename(target),
-                               std::to_string(t.duration().count()));
+    if (ret == 0) {
+        android::base::SetProperty("ro.boottime.init.mount." + Basename(target),
+                                   std::to_string(t.duration().count()));
+    }
     errno = save_errno;
     return ret;
 }
