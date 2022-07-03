@@ -315,6 +315,7 @@ static BatteryMonitor::PowerSupplyType readPowerSupplyType(const String8& path) 
             {"DASH", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_AC},
             {"Dock", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_DOCK},
             {"DASH", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_AC},
+            {"BMS", BatteryMonitor::ANDROID_POWER_SUPPLY_TYPE_BMS },
             {NULL, 0},
     };
     std::string buf;
@@ -986,7 +987,17 @@ void BatteryMonitor::init(struct healthd_config *hc) {
                 }
 
                 break;
-
+            // Fixes Battery status on some old devices
+            case ANDROID_POWER_SUPPLY_TYPE_BMS:
+                if (mHealthdConfig->batteryFullChargePath.isEmpty()) {
+                    path.clear();
+                    path.appendFormat("%s/%s/charge_full",
+                                      POWER_SUPPLY_SYSFS_PATH, name);
+                    if (access(path, R_OK) == 0) {
+                        mHealthdConfig->batteryFullChargePath = path;
+                    }
+                }
+                break;
             case ANDROID_POWER_SUPPLY_TYPE_UNKNOWN:
                 break;
             }
