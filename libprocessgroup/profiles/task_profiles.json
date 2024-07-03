@@ -539,6 +539,32 @@
         }
       ]
     },
+    {
+      "Name": "SFMainPolicyOverride",
+      "Actions": [
+        {
+          "Name": "JoinCgroup",
+          "Params":
+          {
+            "Controller": "cpuset",
+            "Path": "system-background"
+          }
+        }
+      ]
+    },
+    {
+      "Name": "SFRenderEnginePolicyOverride",
+      "Actions": [
+        {
+          "Name": "JoinCgroup",
+          "Params":
+          {
+            "Controller": "cpuset",
+            "Path": "system-background"
+          }
+        }
+      ]
+    },
 
     {
       "Name": "PerfBoost",
