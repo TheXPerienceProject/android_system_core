@@ -74,6 +74,9 @@ on early-init
 
     start ueventd
 
+    # Mount tracefs (with GID=AID_READTRACEFS)
+    mount tracefs tracefs /sys/kernel/tracing gid=3012
+
     # Run apexd-bootstrap so that APEXes that provide critical libraries
     # become available. Note that this is executed as exec_start to ensure that
     # the libraries are available to the processes started after this statement.
@@ -83,9 +86,6 @@ on early-init
     # These must already exist by the time boringssl_self_test32 / boringssl_self_test64 run.
     mkdir /dev/boringssl 0755 root root
     mkdir /dev/boringssl/selftest 0755 root root
-
-    # Mount tracefs (with GID=AID_READTRACEFS)
-    mount tracefs tracefs /sys/kernel/tracing gid=3012
 
     # create sys dirctory
     mkdir /dev/sys 0755 system system
@@ -627,6 +627,9 @@ on post-fs
     mkdir /metadata/aconfig/boot 0775 root system
 
     mkdir /metadata/aconfig_test_missions 0775 root system
+
+    # See flag enable_system_aconfigd_rust, which toggles these processes.
+    exec_start system_aconfigd_platform_init
     exec_start aconfigd-platform-init
 
 on late-fs
@@ -786,6 +789,8 @@ on post-fs-data
     mkdir /data/misc/shared_relro 0771 shared_relro shared_relro
     mkdir /data/misc/systemkeys 0700 system system
     mkdir /data/misc/wifi 0770 wifi wifi
+    mkdir /data/misc/wifi/mainline_supplicant 0770 wifi wifi
+    mkdir /data/misc/wifi/mainline_supplicant/sockets 0770 wifi wifi
     mkdir /data/misc/wifi/sockets 0770 wifi wifi
     mkdir /data/misc/wifi/wpa_supplicant 0770 wifi wifi
     mkdir /data/misc/ethernet 0770 system system
@@ -1010,7 +1015,16 @@ on post-fs-data
     # Wait for apexd to finish activating APEXes before starting more processes.
     wait_for_prop apexd.status activated
     perform_apex_config
+
+    # See flag enable_system_aconfigd_rust, which toggles these processes.
     exec_start aconfigd-mainline-init
+    exec_start system_aconfigd_mainline_init
+
+    # system_aconfigd_socket_service is replacing aconfigd:
+    #   - A flag (enable_system_aconfigd_rust) toggles which socket executes.
+    #   - When enabled, aconfigd is a no-op, system_aconfigd_socket_service executes.
+    #   - Conversely, when disabled, aconfigd executes, and system_aconfigd_socket_service is a no-op.
+    start system_aconfigd_socket_service
     start aconfigd
 
     # Create directories for boot animation.
