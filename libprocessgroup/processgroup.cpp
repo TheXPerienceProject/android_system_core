@@ -154,6 +154,23 @@ bool CgroupGetAttributePathForTask(const std::string& attr_name, pid_t tid, std:
     return true;
 }
 
+bool CgroupGetAttributePathForProcess(std::string_view attr_name, uid_t uid, pid_t pid,
+                                      std::string &path) {
+    const TaskProfiles& tp = TaskProfiles::GetInstance();
+    const IProfileAttribute* attr = tp.GetAttribute(attr_name);
+
+    if (attr == nullptr) {
+        return false;
+    }
+
+    if (!attr->GetPathForProcess(uid, pid, &path)) {
+        LOG(ERROR) << "Failed to find cgroup for uid " << uid << " pid " << pid;
+        return false;
+    }
+
+    return true;
+}
+
 bool UsePerAppMemcg() {
     bool low_ram_device = GetBoolProperty("ro.config.low_ram", false);
     return GetBoolProperty("ro.config.per_app_memcg", low_ram_device);
@@ -744,10 +761,6 @@ bool setProcessGroupSoftLimit(uid_t, pid_t pid, int64_t soft_limit_in_bytes) {
 
 bool setProcessGroupLimit(uid_t, pid_t pid, int64_t limit_in_bytes) {
     return SetProcessGroupValue(pid, "MemLimit", limit_in_bytes);
-}
-
-bool getAttributePathForTask(const std::string& attr_name, pid_t tid, std::string* path) {
-    return CgroupGetAttributePathForTask(attr_name, tid, path);
 }
 
 bool isProfileValidForProcess(const std::string& profile_name, uid_t uid, pid_t pid) {

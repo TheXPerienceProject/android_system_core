@@ -27,8 +27,6 @@ on early-init
     # Set the security context of /postinstall if present.
     restorecon /postinstall
 
-    mkdir /acct/uid
-
     # memory.pressure_level used by lmkd
     chown root system /dev/memcg/memory.pressure_level
     chmod 0040 /dev/memcg/memory.pressure_level
@@ -634,9 +632,6 @@ on late-fs
 
     # HALs required before storage encryption can get unlocked (FBE)
     class_start early_hal
-
-    # Load trusted keys from dm-verity protected partitions
-    exec -- /system/bin/fsverity_init --load-verified-keys
 
 # Don't enable the bootreceiver tracing instance to save 10MB of memory
 on late-fs
