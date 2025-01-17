@@ -64,6 +64,7 @@ fi
 
 # libprocessgroup will pick this up for all future cgroup creations, including on the next boot
 echo $max_activation_depth > $OVERRIDE_FILE_PATH
+chmod ugo+r $OVERRIDE_FILE_PATH
 
 if [ $max_activation_depth -lt $current_activation_depth ]
 then
