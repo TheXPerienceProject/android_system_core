@@ -18,15 +18,19 @@
 
 #include <algorithm>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <string_view>
 
 #include <mntent.h>
+#include <unistd.h>
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
+#include <android-base/strings.h>
 #include <json/reader.h>
 #include <json/value.h>
 
@@ -111,7 +115,6 @@ void MergeCgroupToDescriptors(CgroupDescriptorMap* descriptors, const Json::Valu
 }
 
 bool ReadDescriptorsFromFile(const std::string& file_name, CgroupDescriptorMap* descriptors) {
-    static constexpr bool force_memcg_v2 = android::libprocessgroup_flags::force_memcg_v2();
     std::vector<CgroupDescriptor> result;
     std::string json_doc;
 
@@ -133,14 +136,10 @@ bool ReadDescriptorsFromFile(const std::string& file_name, CgroupDescriptorMap* 
         const Json::Value& cgroups = root["Cgroups"];
         for (Json::Value::ArrayIndex i = 0; i < cgroups.size(); ++i) {
             std::string name = cgroups[i]["Controller"].asString();
-
-            if (force_memcg_v2 && name == "memory") continue;
-
             MergeCgroupToDescriptors(descriptors, cgroups[i], name, "", 1);
         }
     }
 
-    bool memcgv2_present = false;
     std::string root_path;
     if (root.isMember("Cgroups2")) {
         const Json::Value& cgroups2 = root["Cgroups2"];
@@ -150,22 +149,8 @@ bool ReadDescriptorsFromFile(const std::string& file_name, CgroupDescriptorMap* 
         const Json::Value& childGroups = cgroups2["Controllers"];
         for (Json::Value::ArrayIndex i = 0; i < childGroups.size(); ++i) {
             std::string name = childGroups[i]["Controller"].asString();
-
-            if (force_memcg_v2 && name == "memory") memcgv2_present = true;
-
             MergeCgroupToDescriptors(descriptors, childGroups[i], name, root_path, 2);
         }
-    }
-
-    if (force_memcg_v2 && !memcgv2_present) {
-        LOG(INFO) << "Forcing memcg to v2 hierarchy";
-        Json::Value memcgv2;
-        memcgv2["Controller"] = "memory";
-        memcgv2["NeedsActivation"] = true;
-        memcgv2["Path"] = ".";
-        memcgv2["Optional"] = true;  // In case of cgroup_disabled=memory, so we can still boot
-        MergeCgroupToDescriptors(descriptors, memcgv2, "memory",
-                                 root_path.empty() ? CGROUP_V2_ROOT_DEFAULT : root_path, 2);
     }
 
     return true;
@@ -191,6 +176,38 @@ static std::optional<std::map<MountDir, MountOpts>> ReadCgroupV1Mounts() {
     endmntent(fp);
 
     return mounts;
+}
+
+// Keep the override file open to reduce open syscalls, but read it every time.
+// Note that memcgv2_activation_depth.sh can race with us here.
+std::optional<unsigned int> ReadMaxActivationDepthMetadataOverride() {
+    static const char* OVERRIDE_FILE_PATH =
+        "/metadata/libprocessgroup/memcg_v2_max_activation_depth";
+    static int override_fd = open(OVERRIDE_FILE_PATH, O_RDONLY | O_CLOEXEC);
+    static std::mutex mtx;
+
+    std::unique_lock lock(mtx);
+    if (override_fd < 0) {
+        override_fd = open(OVERRIDE_FILE_PATH, O_RDONLY | O_CLOEXEC);
+        if (override_fd < 0) return std::nullopt;
+    }
+
+    std::string depth_str;
+    const bool ret = android::base::ReadFdToString(override_fd, &depth_str);
+    lseek(override_fd, 0, SEEK_SET);
+    lock.unlock();
+
+    if (!ret) {
+        PLOG(ERROR) << "Failed to read max activation depth override";
+        return std::nullopt;
+    }
+
+    unsigned int depth;
+    if (!android::base::ParseUint(android::base::Trim(depth_str), &depth)) {
+        PLOG(ERROR) << "Failed to convert max activation depth override (" << depth_str << ')';
+        return std::nullopt;
+    }
+    return depth;
 }
 
 }  // anonymous namespace
@@ -254,7 +271,10 @@ bool ReadDescriptors(CgroupDescriptorMap* descriptors) {
 bool ActivateControllers(const std::string& path, const CgroupDescriptorMap& descriptors) {
     for (const auto& [name, descriptor] : descriptors) {
         const uint32_t flags = descriptor.controller()->flags();
-        const uint32_t max_activation_depth = descriptor.controller()->max_activation_depth();
+        uint32_t max_activation_depth;
+        std::optional<unsigned int> metadataMaxDepth = ReadMaxActivationDepthMetadataOverride();
+        if (metadataMaxDepth) max_activation_depth = *metadataMaxDepth;
+        else max_activation_depth = descriptor.controller()->max_activation_depth();
         const unsigned int depth = GetCgroupDepth(descriptor.controller()->path(), path);
 
         if (flags & CGROUPRC_CONTROLLER_FLAG_NEEDS_ACTIVATION && depth < max_activation_depth) {
