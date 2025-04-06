@@ -292,9 +292,6 @@ cc_binary {
         "make_f2fs",
         "mke2fs",
         "sload_f2fs",
-
-        // TODO: Revert after go/android-memcgv2-exp b/386797433
-        "memcgv2_activation_depth",
     ],
 }
 
@@ -602,6 +599,7 @@ cc_defaults {
     ],
     static_libs: [
         "libbase",
+        "libfstab",
         "libselinux",
         "libpropertyinfoserializer",
         "libpropertyinfoparser",
@@ -692,11 +690,4 @@ phony {
         true: [],
         default: ["init_first_stage"],
     }),
-}
-
-// TODO: Revert after go/android-memcgv2-exp b/386797433
-sh_binary {
-    name: "memcgv2_activation_depth",
-    src: "memcgv2_activation_depth.sh",
-    filename_from_src: true,
 }
