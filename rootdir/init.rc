@@ -1407,11 +1407,11 @@ on property:sys.snapshotctl.unmap=requested
     
 on property:sys.boot_completed=1
     # write initial cpuset
-    write /dev/cpuset/top-app/cpus ${persist.sys.voltage_cpu_unlimit_ui:-0-7}
-    write /dev/cpuset/camera-daemon/cpus ${persist.sys.voltage_cpu_unlimit_ui:-0-7}
-    write /dev/cpuset/foreground/cpus ${persist.sys.voltage_cpu_fg:-0-5}
-    write /dev/cpuset/foreground_window/cpus ${persist.sys.voltage_cpu_fg:-0-5}
-    write /dev/cpuset/dex2oat/cpus ${persist.sys.voltage_cpu_bg:-0-2}
-    write /dev/cpuset/restricted/cpus ${persist.sys.voltage_cpu_bg:-0-2}
-    write /dev/cpuset/system-background/cpus ${persist.sys.voltage_cpu_bg:-0-2}
-    write /dev/cpuset/background/cpus ${persist.sys.voltage_cpu_bg:-0-2}
+    write /dev/cpuset/top-app/cpus ${persist.sys.xperience_cpu_unlimit_ui:-0-7}
+    write /dev/cpuset/camera-daemon/cpus ${persist.sys.xperience_cpu_unlimit_ui:-0-7}
+    write /dev/cpuset/foreground/cpus ${persist.sys.xperience_cpu_fg:-0-5}
+    write /dev/cpuset/foreground_window/cpus ${persist.sys.xperience_cpu_fg:-0-5}
+    write /dev/cpuset/dex2oat/cpus ${persist.sys.xperience_cpu_bg:-0-2}
+    write /dev/cpuset/restricted/cpus ${persist.sys.xperience_cpu_bg:-0-2}
+    write /dev/cpuset/system-background/cpus ${persist.sys.xperience_cpu_bg:-0-2}
+    write /dev/cpuset/background/cpus ${persist.sys.xperience_cpu_bg:-0-2}
