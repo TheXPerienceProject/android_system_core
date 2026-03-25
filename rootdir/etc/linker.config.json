@@ -34,6 +34,8 @@
     "libaptX_encoder.so",
     "libaptXHD_encoder.so",
     "libEGL.so",
-    "libGLESv2.so"
+    "libGLESv2.so",
+    "libtensorflowlite_jni.so",
+    "libtensorflowlite_gpu_jni.so"
   ]
 }
