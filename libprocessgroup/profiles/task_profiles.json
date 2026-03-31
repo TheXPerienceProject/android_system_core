@@ -700,6 +700,32 @@
           }
         }
       ]
+    },
+    {
+      "Name": "BioAudioOptimized",
+      "Actions": [
+        {
+          "Name": "JoinCgroup",
+          "Params": {
+            "Controller": "cpu",
+            "Path": "system-background"
+          }
+        },
+        {
+          "Name": "SetAttribute",
+          "Params": {
+            "Name": "UClampMin",
+            "Value": "15"
+          }
+        },
+        {
+          "Name": "SetAttribute",
+          "Params": {
+            "Name": "UClampLatencySensitive",
+            "Value": "1"
+          }
+        }
+      ]
     }
   ],
 
@@ -787,6 +813,14 @@
     {
       "Name": "SCHED_LMKD_REAP_TARGET",
       "Profiles": [ "SCHED_SP_FOREGROUND" ]
+    },
+    {
+      "Name": "FINGERPRINT_SERVICE_POLICY",
+      "Profiles": [ "BioAudioOptimized", "LowIoPriority", "TimerSlackNormal" ]
+    },
+    {
+      "Name": "AUDIO_SERVICE_OPTIMIZED",
+      "Profiles": [ "BioAudioOptimized", "LowIoPriority", "TimerSlackNormal" ]
     }
   ]
 }
