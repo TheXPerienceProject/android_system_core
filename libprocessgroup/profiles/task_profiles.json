@@ -705,14 +705,14 @@
           "Name": "JoinCgroup",
           "Params": {
             "Controller": "cpu",
-            "Path": "system-background"
+            "Path": "foreground"
           }
         },
         {
           "Name": "SetAttribute",
           "Params": {
             "Name": "UClampMin",
-            "Value": "15"
+            "Value": "30"
           }
         },
         {
@@ -809,7 +809,7 @@
     },
     {
       "Name": "AUDIO_SERVICE_OPTIMIZED",
-      "Profiles": [ "BioAudioOptimized", "LowIoPriority", "TimerSlackNormal" ]
+      "Profiles": [ "BioAudioOptimized", "TimerSlackNormal" ]
     }
   ]
 }
