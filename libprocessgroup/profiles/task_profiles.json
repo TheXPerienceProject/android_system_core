@@ -699,12 +699,38 @@
       ]
     },
     {
-      "Name": "BioAudioOptimized",
+      "Name": "BioMetricsOptimized",
       "Actions": [
         {
           "Name": "JoinCgroup",
           "Params": {
             "Controller": "cpu",
+            "Path": "system-background"
+          }
+        },
+        {
+          "Name": "SetAttribute",
+          "Params": {
+            "Name": "UClampMin",
+            "Value": "15"
+          }
+        },
+        {
+          "Name": "SetAttribute",
+          "Params": {
+            "Name": "UClampLatencySensitive",
+            "Value": "1"
+          }
+        }
+      ]
+    },
+    {
+      "Name": "AudioOptimized",
+      "Actions": [
+        {
+          "Name": "JoinCgroup",
+          "Params": {
+            "Controller": "cpuset",
             "Path": "foreground"
           }
         },
@@ -712,7 +738,7 @@
           "Name": "SetAttribute",
           "Params": {
             "Name": "UClampMin",
-            "Value": "30"
+            "Value": "45"
           }
         },
         {
@@ -805,11 +831,11 @@
     },
     {
       "Name": "FINGERPRINT_SERVICE_POLICY",
-      "Profiles": [ "BioAudioOptimized", "LowIoPriority", "TimerSlackNormal" ]
+      "Profiles": [ "BioMetricsOptimized", "LowIoPriority", "TimerSlackNormal" ]
     },
     {
       "Name": "AUDIO_SERVICE_OPTIMIZED",
-      "Profiles": [ "BioAudioOptimized", "TimerSlackNormal" ]
+      "Profiles": [ "AudioOptimized", "HighPerformance", "TimerSlackNormal" ]
     }
   ]
 }
