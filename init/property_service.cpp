@@ -879,7 +879,7 @@ static void update_sys_usb_config() {
     std::string debug_value = GetProperty(DEBUG_PROP, "0");
     bool debug_enabled = debug_value == "1";
 
-    const bool add_adb_func = android::base::GetBoolProperty("ro.adb.secure", false) &&
+    const bool add_adb_func = android::base::GetBoolProperty("ro.debuggable", false) &&
                               android::base::GetBoolProperty("ro.adb.has_usb", true);
 
     std::string config = android::base::GetProperty("persist.sys.usb.config", "");
